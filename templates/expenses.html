@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="page-head"><div><span class="eyebrow">FINANZAS</span><h1>Gastos</h1><p>Registra los gastos operativos para conocer tus ganancias.</p></div></section>
+<section class="panel"><h2>Registrar gasto</h2><form method="post" class="product-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Concepto<input name="description" maxlength="200" required></label><label>Categoría<input name="category" placeholder="Renta, servicios, transporte…" maxlength="80" required></label><label>Importe MXN<input name="amount" type="number" min="0.01" step="0.01" required></label><label>Fecha<input name="spent_on" type="date" value="{{ today }}" required></label><button class="button primary">Guardar gasto</button></form></section>
+<section class="panel"><h2>Historial de gastos</h2><div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th>Importe</th></tr></thead><tbody>{% for e in items %}<tr><td>{{ e['spent_on'] }}</td><td>{{ e['description'] }}</td><td>{{ e['category'] }}</td><td>{{ peso(e['amount_cents']) }}</td></tr>{% else %}<tr><td colspan="4">Todavía no hay gastos registrados.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

@@ -1,0 +1,5 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="page-head"><div><span class="eyebrow">ALMACÉN</span><h1>Inventario</h1><p>Disponibilidad y valoración al costo actual de tus productos.</p></div><a class="button primary" href="{{ url_for('products') }}">Administrar existencias</a></section>
+<section class="panel"><div class="table-scroll"><table><thead><tr><th>Producto / SKU</th><th>Existencias</th><th>Mínimo</th><th>Valor al costo</th><th>Estado</th></tr></thead><tbody>{% for p in items %}<tr><td><b>{{ p['name'] }}</b><small>{{ p['sku'] }}</small></td><td>{{ p['stock'] }}</td><td>{{ p['minimum_stock'] }}</td><td>{{ peso(p['stock'] * p['cost_cents']) if p['cost_cents'] is not none else 'Sin costo registrado' }}</td><td><span class="pill {{ 'danger' if p['stock'] <= p['minimum_stock'] else 'ok' }}">{{ 'Retirado' if not p['active'] else ('Reponer' if p['stock'] <= p['minimum_stock'] else 'Disponible') }}</span></td></tr>{% else %}<tr><td colspan="5">Agrega productos para comenzar tu inventario.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

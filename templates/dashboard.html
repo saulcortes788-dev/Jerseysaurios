@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}Inicio · Jerseysaurios{% endblock %}
+{% block content %}
+<section class="page-head"><div><span class="eyebrow">RESUMEN GENERAL</span><h1>Tu negocio, bajo control.</h1><p>Consulta tus existencias, ventas y alertas desde un solo lugar.</p></div><a class="button primary" href="{{ url_for('sales_page') }}">+ Registrar venta</a></section>
+<section class="stats-grid" aria-label="Indicadores">
+  <article class="stat"><div class="stat-label">Productos diferentes</div><strong>{{ stats['products'] }}</strong><small>SKUs registrados</small></article>
+  <article class="stat"><div class="stat-label">Unidades disponibles</div><strong>{{ stats['units'] }}</strong><small>Piezas en inventario</small></article>
+  <article class="stat"><div class="stat-label">Ingresos por ventas</div><strong>{{ peso(sales['revenue']) }}</strong><small>Histórico total registrado</small></article>
+  <article class="stat warning"><div class="stat-label">Inventario bajo</div><strong>{{ stats['low'] }}</strong><small>Productos a revisar</small></article>
+</section>
+<section class="stats-grid"><article class="stat"><div class="stat-label">Gastos acumulados</div><strong>{{ peso(expenses) }}</strong></article><article class="stat"><div class="stat-label">Costo vendido conocido</div><strong>{{ peso(finance['cost']) }}</strong></article><article class="stat"><div class="stat-label">Utilidad estimada</div><strong>{{ peso(finance['revenue']-finance['cost']-expenses) }}</strong><small>{{ 'Faltan costos históricos' if finance['missing'] else 'Antes de impuestos' }}</small></article><article class="stat"><a href="{{ url_for('orders_admin') }}">Administrar pedidos →</a><p>Reserva de stock y pagos manuales.</p></article></section><section class="panel"><h2>Productos más vendidos</h2>{% for p in best %}<div class="line"><b>{{ p['product_name'] }}</b><span>{{ p['units'] }} unidades</span></div>{% else %}<p>Aún no hay ventas.</p>{% endfor %}</section><div class="split">
+  <section class="panel"><div class="panel-head"><div><h2>Alertas de inventario</h2><p>Productos con existencias iguales o menores a su mínimo.</p></div></div>
+    {% if low_stock %}<div class="list-lines">{% for p in low_stock %}<div class="line"><div><b>{{ p['name'] }}</b><small>{{ p['team'] }} · {{ p['size'] }} · {{ p['sku'] }}</small></div><span class="pill danger">{{ p['stock'] }} disponibles</span></div>{% endfor %}</div>
+    {% else %}<div class="empty">✓ Sin alertas por ahora. Agrega productos para comenzar.</div>{% endif %}
+    <a class="text-link" href="{{ url_for('products') }}">Administrar productos →</a>
+  </section>
+  <section class="panel"><div class="panel-head"><div><h2>Últimas ventas</h2><p>{{ sales['operations'] }} ventas · {{ sales['units_sold'] }} piezas vendidas en total.</p></div></div>
+    {% if recent %}<div class="list-lines">{% for s in recent %}<div class="line"><div><b>{{ s['product_name'] }}</b><small>{{ s['sold_at'] }} · {{ s['quantity'] }} pieza(s)</small></div><b>{{ peso(s['total_cents']) }}</b></div>{% endfor %}</div>
+    {% else %}<div class="empty">Todavía no hay ventas registradas.</div>{% endif %}
+    <a class="text-link" href="{{ url_for('sales_page') }}">Ver ventas →</a>
+  </section>
+</div>
+{% endblock %}

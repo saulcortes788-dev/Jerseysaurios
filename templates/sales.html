@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Ventas · Jerseysaurios{% endblock %}
+{% block content %}
+<section class="page-head"><div><span class="eyebrow">MOVIMIENTOS</span><h1>Ventas</h1><p>Registra cada venta y descuenta automáticamente las piezas del inventario.</p></div><a class="button secondary" href="{{ url_for('export_csv', kind='ventas') }}">↓ Exportar CSV</a></section>
+<section class="panel form-panel"><h2>Registrar una venta</h2>
+{% if items %}<form method="post" class="sale-form" action="{{ url_for('sales_page') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Producto<select name="product_id" required>{% for p in items %}<option value="{{ p['id'] }}">{{ p['name'] }} · {{ p['size'] }} · {{ p['sku'] }} ({{ p['stock'] }} disp. / {{ peso(p['price_cents']) }})</option>{% endfor %}</select></label><label>Cliente<select name="client_id"><option value="">Público general</option>{% for c in clients %}<option value="{{ c['id'] }}">{{ c['name'] }}</option>{% endfor %}</select></label><label>Cantidad<input type="number" name="quantity" min="1" max="100000" value="1" required></label><button class="button primary" type="submit">Registrar venta</button></form><p class="hint">El precio aplicado es el precio actual del producto. La venta queda guardada con su precio histórico.</p>
+{% else %}<p class="empty">No tienes productos con existencias. <a href="{{ url_for('products') }}">Agrega inventario</a> para registrar ventas.</p>{% endif %}</section>
+<section class="panel"><div class="panel-head"><div><h2>Historial de ventas</h2><p>Se muestran las últimas 100 operaciones. El CSV incluye todas.</p></div></div>
+{% if history %}<div class="table-scroll"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Precio unitario</th><th>Total</th></tr></thead><tbody>
+{% for s in history %}<tr><td>#{{ s['id'] }}{% if s['voided'] %}<small>ANULADA POR CANCELACIÓN</small>{% endif %}{% if s['order_id'] %}<small>Pedido #{{ s['order_id'] }}</small>{% endif %}</td><td>{{ s['sold_at'] }}</td><td><b>{{ s['product_name'] }}</b><small>{{ s['sku'] }}</small></td><td>{{ s['quantity'] }}</td><td>{{ peso(s['unit_price_cents']) }}</td><td><b>{{ peso(s['total_cents']) }}</b></td></tr>{% endfor %}</tbody></table></div>
+{% else %}<div class="empty">Aún no hay ventas registradas.</div>{% endif %}</section>
+{% endblock %}
