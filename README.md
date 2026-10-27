@@ -1,5 +1,9 @@
 # Jerseysaurios · Tienda y administración local
 
+La carga de los 505 registros de `listado_wavesoccer_nuevo.txt` organiza diez grupos por equipo y tipo; solo añade temporadas cuando el archivo las indica. Reutiliza categorías existentes y conserva productos. `flask --app app:create_app load-wavesoccer` simula; `load-wavesoccer --apply` respalda SQLite y aplica exclusivamente en local. No se ejecuta al iniciar la aplicación. Consulta [docs/REVISION_WAVESOCCER.md](docs/REVISION_WAVESOCCER.md) para revisar equivalencias, resultados y publicación pendiente. La lista suministrada no acredita inventario ni disponibilidad actual del proveedor.
+
+La herramienta independiente `python -m negocio.wavesoccer_release` prepara respaldos SQLite, simula importaciones y ofrece recuperación selectiva. La aplicación real exige respaldo íntegro y vigente, SHA-256 y confirmaciones explícitas. Consulta los [comandos de publicación y recuperación](docs/HERRAMIENTA_WAVESOCCER_PRODUCCION.md) antes de usarla. Se mantiene el bloqueo del cargador local en producción.
+
 Aplicación en español con Python, Flask, SQLite, HTML, CSS y JavaScript. Para publicarla permanentemente, consulta [PUBLICAR_EN_RENDER.md](PUBLICAR_EN_RENDER.md). Diseño azul y blanco adaptable a teléfonos y computadoras. Conserva los módulos anteriores de ventas directas, gastos, clientes, inventario y reportes.
 
 ## 1. Iniciar en Linux

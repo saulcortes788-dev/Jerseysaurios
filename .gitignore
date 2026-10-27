@@ -11,3 +11,19 @@ dist/
 *.sqlite3
 *.sqlite3-*
 *.log
+
+# Bases, respaldos y claves privadas fuera de las carpetas habituales.
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.tar.gz
+*.tgz
+*.bak
+*.backup
+*.pem
+*.key
+.secret_key
+.ssh/
+id_ed25519
+id_rsa
