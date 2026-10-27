@@ -11,6 +11,26 @@ from werkzeug.security import generate_password_hash
 
 
 def register_commands(app,get_db):
+    @app.cli.command('load-wavesoccer')
+    @click.option('--apply', 'apply_changes', is_flag=True, help='Aplica en local después de respaldar SQLite. Sin esta opción solo simula.')
+    def load_wavesoccer(apply_changes):
+        """Añade las ramas de los 505 registros proporcionados por el propietario."""
+        from .wavesoccer import read_catalog, apply_catalog, backup_database
+        catalog = read_catalog()
+        db = get_db()
+        if apply_changes:
+            if app.config['PRODUCTION']:
+                raise click.ClickException('Esta carga está limitada al entorno local; producción requiere una revisión separada.')
+            backup = backup_database(db, app.config['DATABASE'])
+            count = apply_catalog(db, catalog)
+            click.echo(f'Respaldo: {backup}')
+        else:
+            with sqlite3.connect(':memory:') as preview:
+                db.backup(preview)
+                count = apply_catalog(preview, catalog)
+        click.echo(f'Categorías nuevas: {count}. Registros procesados: {len(catalog["entries"])}. Cobertura: {catalog["coverage"]}.')
+        click.echo('Carga local aplicada.' if apply_changes else 'Simulación: no se aplicó el catálogo. Usa --apply para cargarlo en local.')
+
     def new_password():
         password=click.prompt('Contraseña (mínimo 12 caracteres)',hide_input=True,confirmation_prompt=True)
         if len(password)<12:

@@ -3,7 +3,7 @@ from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT=Path(__file__).resolve().parent.parent
-FILES=('app.py','wsgi.py','gunicorn.conf.py','requirements.txt','render.yaml','.env.example','.gitignore','README.md','PUBLICAR_EN_RENDER.md','iniciar.sh','seed_categorias.py','cargar_demo.py')
+FILES=('app.py','wsgi.py','gunicorn.conf.py','requirements.txt','render.yaml','.env.example','.gitignore','README.md','PUBLICAR_EN_RENDER.md','iniciar.sh','seed_categorias.py','cargar_demo.py','listado_wavesoccer_nuevo.txt')
 FOLDERS=('negocio','templates','static','tests','scripts','docs')
 
 
