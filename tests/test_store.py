@@ -137,3 +137,178 @@ class StoreTests(unittest.TestCase):
         load_demo(self.app.config['DATABASE']);load_demo(self.app.config['DATABASE'])
         self.assertEqual(self.dbrow('SELECT COUNT(*) FROM products')[0],5)
         self.assertIn(b'[DEMOSTRACI',self.client.get('/').data)
+
+    def test_multiple_sizes_delivery_server_prices_and_whatsapp(self):
+        import html
+        import re
+        from urllib.parse import urlparse, parse_qs
+        self.product()
+        self.client.post('/productos/1/variante', data={'csrf_token':self.csrf,'sku':'JERSEY-L','size':'L','stock':'4'})
+        self.product(sku='OTRO-S', name='Otro jersey', size='S', price='350.25')
+        self.client.post('/admin/tienda', data={'csrf_token':self.csrf,'whatsapp':'525512345678','title':'Jerseysaurios'})
+        buyer,token=self.buyer()
+        for pid,qty in [('1','2'),('2','1'),('3','1')]:
+            buyer.post('/carrito/agregar',data={'csrf_token':token,'product_id':pid,'quantity':qty})
+        buyer.post('/carrito/actualizar',data={'csrf_token':token,'product_id':'3','quantity':'0'})
+        buyer.post('/carrito/actualizar',data={'csrf_token':token,'product_id':'1','quantity':'3'})
+        self.assertIn(b'$2,399.60',buyer.get('/carrito').data)
+        with buyer.session_transaction() as s:
+            key=s['checkout_key']
+            self.assertEqual(s['cart'],{'1':3,'2':1})
+        # Change the authoritative price after the cart was viewed.
+        with sqlite3.connect(self.app.config['DATABASE']) as db:
+            db.execute('UPDATE products SET price_cents=60000 WHERE id=1')
+        payload={'csrf_token':token,'checkout_key':key,'name':'Cliente sintético','phone':'5512345678',
+                 'delivery_method':'envio','delivery_details':'Destinatario de prueba, Calle Ficticia 123, Centro, Ciudad de México, CDMX, 06000',
+                 'total':'1','price_cents':'1'}
+        result=buyer.post('/pedir',data=payload)
+        self.assertTrue(result.location.startswith('/pedido/'))
+        self.assertEqual(buyer.post('/pedir',data=payload).location,result.location)
+        order=self.dbrow('SELECT * FROM orders')
+        self.assertEqual(order['total_cents'],239990)
+        self.assertEqual(order['delivery_details'],payload['delivery_details'])
+        self.assertEqual(order['seller_decision'],'pendiente')
+        self.assertEqual(self.dbrow('SELECT COUNT(*) FROM orders')[0],1)
+        self.assertEqual(self.dbrow('SELECT stock FROM products WHERE id=1')[0],2)
+        receipt=buyer.get(result.location).data.decode()
+        self.assertIn('Folio #1',receipt)
+        link=html.unescape(re.search(r'href="(https://wa.me/[^\"]+)"',receipt).group(1))
+        self.assertEqual(urlparse(link).path,'/525512345678')
+        message=parse_qs(urlparse(link).query)['text'][0]
+        for expected in ('pedido #1','3 × Jersey local (M)','1 × Jersey local (L)','2399.90'):
+            self.assertIn(expected,message)
+        buyer.get(result.location)
+        self.assertEqual(self.dbrow('SELECT seller_decision FROM orders')[0],'pendiente')
+        self.assertIn(b'Cliente',self.client.get('/admin/pedidos').data)
+        self.assertIn(payload['delivery_details'].encode(),self.client.get('/admin/pedidos/1').data)
+        self.assertEqual(buyer.get('/admin/pedidos/1').status_code,302)
+        self.assertEqual(buyer.post('/admin/pedidos/1',data={'csrf_token':token,'action':'confirm'}).status_code,302)
+        self.assertEqual(self.dbrow('SELECT seller_decision FROM orders')[0],'pendiente')
+        for _ in range(2):
+            self.client.post('/admin/pedidos/1',data={'csrf_token':self.csrf,'action':'confirm'})
+        self.assertEqual(self.dbrow('SELECT seller_decision FROM orders')[0],'confirmado')
+        self.assertEqual(self.dbrow('SELECT status FROM orders')[0],'pendiente')
+        self.assertEqual(self.dbrow('SELECT COUNT(*) FROM sales')[0],0)
+
+    def test_reject_releases_inventory_once(self):
+        self.product()
+        self.order()
+        for _ in range(2):
+            self.client.post('/admin/pedidos/1',data={'csrf_token':self.csrf,'action':'reject'})
+        self.assertEqual(self.dbrow('SELECT status,seller_decision FROM orders')[:],('cancelado','rechazado'))
+        self.assertEqual(self.dbrow('SELECT stock FROM products')[0],5)
+        self.client.post('/admin/pedidos/1',data={'csrf_token':self.csrf,'action':'confirm'})
+        self.assertEqual(self.dbrow('SELECT seller_decision FROM orders')[0],'rechazado')
+
+    def test_delivery_validation_and_atomic_multiple_stock(self):
+        self.product()
+        self.product(sku='OTRO-L',size='L')
+        buyer,token=self.buyer()
+        for pid in ('1','2'):
+            buyer.post('/carrito/agregar',data={'csrf_token':token,'product_id':pid,'quantity':'2'})
+        with buyer.session_transaction() as s:key=s['checkout_key']
+        payload={'csrf_token':token,'checkout_key':key,'name':'Prueba','phone':'5512345678','delivery_method':'envio'}
+        buyer.post('/pedir',data=payload)
+        self.assertEqual(self.dbrow('SELECT COUNT(*) FROM orders')[0],0)
+        with sqlite3.connect(self.app.config['DATABASE']) as db:
+            db.execute('UPDATE products SET stock=1 WHERE id=2')
+        buyer.post('/pedir',data={**payload,'delivery_details':'Dirección sintética'})
+        self.assertEqual(self.dbrow('SELECT COUNT(*) FROM orders')[0],0)
+        self.assertEqual(self.dbrow('SELECT COUNT(*) FROM clients')[0],0)
+        self.assertEqual(self.dbrow('SELECT stock FROM products WHERE id=1')[0],5)
+
+    def test_additive_order_schema_preserves_legacy_data(self):
+        from pathlib import Path
+        from negocio.store import initialize_store
+        # Entirely synthetic legacy database, held in memory.
+        with sqlite3.connect(':memory:') as db:
+            db.row_factory=sqlite3.Row
+            db.executescript(Path('tests/fixtures/schema_antes_jerarquia.sql').read_text())
+            db.execute("INSERT INTO clients(id,name,phone,email) VALUES(1,'Prueba','5512345678','')")
+            db.execute("INSERT INTO orders(id,token,checkout_key,client_id,total_cents) VALUES(1,'token-prueba','clave-prueba',1,12345)")
+            before=dict(db.execute('SELECT * FROM orders').fetchone())
+            initialize_store(db)
+            initialize_store(db)
+            after=dict(db.execute('SELECT * FROM orders').fetchone())
+            self.assertEqual({k:after[k] for k in before},before)
+            self.assertEqual([after[k] for k in ('delivery_method','delivery_details','seller_decision')],['','',''])
+
+    def test_seller_can_confirm_after_payment(self):
+        self.product()
+        self.order()
+        self.client.post('/admin/pedidos/1',data={'csrf_token':self.csrf,'action':'payment','amount':'1199.80','method':'Efectivo'})
+        self.assertEqual(self.dbrow('SELECT status FROM orders')[0],'pagado')
+        self.assertIn(b'Confirmar pedido',self.client.get('/admin/pedidos/1').data)
+        self.client.post('/admin/pedidos/1',data={'csrf_token':self.csrf,'action':'confirm'})
+        self.assertEqual(self.dbrow('SELECT seller_decision FROM orders')[0],'confirmado')
+        self.client.post('/admin/pedidos/1',data={'csrf_token':self.csrf,'action':'reject'})
+        self.assertEqual(self.dbrow('SELECT status,seller_decision FROM orders')[:],('pagado','confirmado'))
+        self.assertEqual(self.dbrow('SELECT stock FROM products')[0],3)
+
+    def test_simultaneous_checkout_creates_one_order(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        self.product()
+        buyer,token=self.buyer()
+        buyer.post('/carrito/agregar',data={'csrf_token':token,'product_id':'1','quantity':'2'})
+        with buyer.session_transaction() as session:key=session['checkout_key']
+        cookie=buyer.get_cookie(self.app.config['SESSION_COOKIE_NAME'])
+        barrier=Barrier(2)
+        def submit():
+            client=self.app.test_client()
+            client.set_cookie(self.app.config['SESSION_COOKIE_NAME'],cookie.value)
+            barrier.wait(timeout=5)
+            return client.post('/pedir',data={'csrf_token':token,'checkout_key':key,'name':'Prueba concurrente','phone':'5512345678'}).location
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            receipts=list(executor.map(lambda _:submit(),range(2)))
+        self.assertTrue(receipts[0].startswith('/pedido/'))
+        self.assertEqual(receipts[0],receipts[1])
+        self.assertEqual(self.dbrow('SELECT COUNT(*) FROM orders')[0],1)
+        self.assertEqual(self.dbrow('SELECT COUNT(*) FROM clients')[0],1)
+        self.assertEqual(self.dbrow('SELECT stock FROM products')[0],3)
+
+    def test_admin_confirmation_form_submits_action_without_button_value(self):
+        from html.parser import HTMLParser
+
+        class Forms(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.forms=[]
+                self.current=None
+            def handle_starttag(self,tag,attrs):
+                attrs=dict(attrs)
+                if tag=='form': self.current={}
+                if tag=='input' and self.current is not None and attrs.get('name'):
+                    self.current[attrs['name']]=attrs.get('value','')
+            def handle_endtag(self,tag):
+                if tag=='form' and self.current is not None:
+                    self.forms.append(self.current)
+                    self.current=None
+
+        self.product(price='500.00')
+        self.order(quantity=1)
+        self.order(quantity=1)
+        # Synthetic paid order, matching the reported $500 payment / $0 balance.
+        with sqlite3.connect(self.app.config['DATABASE']) as db:
+            db.execute("INSERT INTO payments(order_id,amount_cents,method) VALUES(1,50000,'Efectivo')")
+            db.execute("UPDATE orders SET status='pagado',seller_decision='',delivery_method='',delivery_details='' WHERE id=1")
+        def snapshot():
+            with sqlite3.connect(self.app.config['DATABASE']) as db:
+                return {table:db.execute('SELECT * FROM '+table+' ORDER BY id').fetchall()
+                        for table in ('payments','products','sales','order_items')}
+        before=snapshot()
+        for order_id in (1,2):
+            parser=Forms()
+            page=self.client.get(f'/admin/pedidos/{order_id}').data.decode()
+            parser.feed(page)
+            forms=[form for form in parser.forms if form.get('action')=='confirm']
+            self.assertEqual(len(forms),1,'Confirmation must carry action as a hidden input')
+            for _ in range(2):
+                response=self.client.post(f'/admin/pedidos/{order_id}',data=forms[0],follow_redirects=True)
+                self.assertNotIn('Acción inválida'.encode(),response.data)
+            self.assertEqual(self.dbrow('SELECT seller_decision FROM orders WHERE id=?',(order_id,))[0],'confirmado')
+        self.assertEqual(snapshot(),before)
+        self.assertEqual(self.dbrow('SELECT status FROM orders WHERE id=1')[0],'pagado')
+        self.assertEqual(self.dbrow('SELECT status FROM orders WHERE id=2')[0],'pendiente')
+        self.assertIn(b'Sin datos registrados',self.client.get('/admin/pedidos/1').data)
+        self.assertEqual(self.dbrow('SELECT delivery_method,delivery_details FROM orders WHERE id=1')[:],('',''))

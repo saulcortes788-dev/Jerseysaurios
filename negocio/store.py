@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS payments (id INTEGER PRIMARY KEY, order_id INTEGER NO
 
 def initialize_store(db):
     db.executescript(SCHEMA)
-    columns = [('shop_categories', 'kind', "TEXT NOT NULL DEFAULT ''"), ('products', 'model_key', "TEXT NOT NULL DEFAULT ''"), ('products', 'season', "TEXT NOT NULL DEFAULT ''"),
+    columns = [('orders', 'delivery_method', "TEXT NOT NULL DEFAULT ''"),
+               ('orders', 'delivery_details', "TEXT NOT NULL DEFAULT ''"),
+               ('orders', 'seller_decision', "TEXT NOT NULL DEFAULT ''"),
+               ('shop_categories', 'kind', "TEXT NOT NULL DEFAULT ''"), ('products', 'model_key', "TEXT NOT NULL DEFAULT ''"), ('products', 'season', "TEXT NOT NULL DEFAULT ''"),
                ('products', 'version', "TEXT NOT NULL DEFAULT 'Aficionado'"), ('products', 'kit', "TEXT NOT NULL DEFAULT 'Local'"),
                ('products', 'active', 'INTEGER NOT NULL DEFAULT 1'), ('products', 'featured', 'INTEGER NOT NULL DEFAULT 0'),
                ('products', 'is_new', 'INTEGER NOT NULL DEFAULT 0'), ('products', 'on_sale', 'INTEGER NOT NULL DEFAULT 0'),
@@ -181,7 +184,7 @@ def register_store(app, get_db, money, integer):
             cart = dict(session.get('cart', {}))
             if qty == 0: cart.pop(pid, None)
             elif pid in cart:
-                p = get_db().execute('SELECT stock FROM products WHERE id=? AND active=1', (pid,)).fetchone()
+                p = public_product(pid)
                 if not p or qty > p['stock']: raise ValueError('No hay stock suficiente.')
                 cart[pid] = qty
             session['cart'] = cart
@@ -206,15 +209,26 @@ def register_store(app, get_db, money, integer):
             phone = request.form.get('phone','').strip()[:40]
             email = request.form.get('email','').strip()[:120]
             if not name or len(phone)<7: raise ValueError('Completa tu nombre y teléfono de contacto.')
+            delivery_method = request.form.get('delivery_method', 'recoger')
+            delivery_details = request.form.get('delivery_details', '').strip()
+            if delivery_method not in ('recoger', 'envio') or len(delivery_details)>500:
+                raise ValueError('Revisa la modalidad y los datos de entrega (máximo 500 caracteres).')
+            if delivery_method == 'envio' and not delivery_details:
+                raise ValueError('Para envío, indica destinatario, dirección, colonia, ciudad, estado y código postal.')
             if not session.get('cart'): raise ValueError('El carrito está vacío.')
             token = secrets.token_urlsafe(32)
             with db:
                 db.execute('BEGIN IMMEDIATE')
+                existing = db.execute('SELECT token FROM orders WHERE checkout_key=?', (key,)).fetchone()
+                if existing:
+                    return redirect(url_for('order_receipt', token=existing['token']))
                 client = db.execute('SELECT id FROM clients WHERE phone=? AND name=?', (phone,name)).fetchone()
                 client_id = client['id'] if client else db.execute('INSERT INTO clients(name,phone,email) VALUES(?,?,?)', (name,phone,email)).lastrowid
-                order_id = db.execute('INSERT INTO orders(token,checkout_key,client_id,total_cents) VALUES(?,?,?,0)', (token,key,client_id)).lastrowid
+                order_id = db.execute('INSERT INTO orders(token,checkout_key,client_id,total_cents,delivery_method,delivery_details,seller_decision) VALUES(?,?,?,0,?,?,?)', (token,key,client_id,delivery_method,delivery_details,'pendiente')).lastrowid
                 total = 0
                 for pid, qty in session['cart'].items():
+                    qty = integer(str(qty), 'Cantidad', 100)
+                    if qty < 1: raise ValueError('La cantidad debe ser mayor que cero.')
                     p = public_product(pid)
                     if not p or db.execute('UPDATE products SET stock=stock-? WHERE id=? AND stock>=? AND active=1', (qty,pid,qty)).rowcount != 1:
                         raise ValueError('El stock cambió. Revisa las cantidades del carrito.')
@@ -262,7 +276,11 @@ def register_store(app, get_db, money, integer):
                     if not order: abort(404)
                     paid = db.execute('SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE order_id=?', (order_id,)).fetchone()[0]
                     action = request.form.get('action')
-                    if action == 'payment':
+                    if action == 'confirm':
+                        if order['status']=='cancelado' or order['seller_decision']=='rechazado':
+                            raise ValueError('No puedes confirmar pedidos cancelados o rechazados.')
+                        db.execute("UPDATE orders SET seller_decision='confirmado' WHERE id=?", (order_id,))
+                    elif action == 'payment':
                         amount = money(request.form.get('amount',''))
                         method = request.form.get('method','')
                         if order['status']!='pendiente' or amount<=0 or amount>order['total_cents']-paid or method not in ('Efectivo','Transferencia','Otro'):
@@ -271,8 +289,15 @@ def register_store(app, get_db, money, integer):
                         paid += amount
                         if paid == order['total_cents']:
                             recognize_sale(db, order)
-                    elif action == 'status':
+                    elif action in ('status', 'reject'):
                         target = request.form.get('status')
+                        if action == 'reject':
+                            if order['seller_decision']=='rechazado' and order['status']=='cancelado':
+                                return redirect(url_for('order_admin', order_id=order_id))
+                            if order['status']!='pendiente' or paid:
+                                raise ValueError('Para pedidos con pagos utiliza la cancelación con reembolso.')
+                            target = 'cancelado'
+                            db.execute("UPDATE orders SET seller_decision='rechazado' WHERE id=?", (order_id,))
                         if target == 'cancelado' and order['status']!='cancelado':
                             if paid:
                                 reference = request.form.get('refund_reference','').strip()[:200]
