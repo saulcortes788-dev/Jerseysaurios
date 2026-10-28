@@ -13,7 +13,7 @@ def register_access(app, get_db):
 
     @app.before_request
     def require_admin():
-        if request.endpoint in {'static','shop_home','shop_catalog','shop_product','cart_add','cart_update','cart_page','checkout','order_receipt','product_image','category_index','category_page','health'}:
+        if request.endpoint in {'sitemap','robots','static','shop_home','shop_catalog','shop_product','cart_add','cart_update','cart_page','checkout','order_receipt','product_image','category_index','category_page','health'}:
             return
         admin = get_db().execute('SELECT * FROM admins LIMIT 1').fetchone()
         if not admin and app.config['PRODUCTION']:
