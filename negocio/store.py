@@ -2,7 +2,8 @@
 import secrets
 import sqlite3
 from urllib.parse import urlencode
-from flask import request, session, render_template, redirect, url_for, flash, abort
+from xml.etree.ElementTree import Element, SubElement, tostring
+from flask import request, session, render_template, redirect, url_for, flash, abort, Response
 from .media import save_image, save_product_image
 from .categories import (initialize_categories, register_category_admin, category_rows, visibility_sql, descendants, assign_product_category)
 
@@ -46,6 +47,30 @@ def initialize_store(db):
 
 def register_store(app, get_db, money, integer):
     register_category_admin(app,get_db,integer)
+
+    @app.get('/sitemap.xml')
+    def sitemap():
+        root = Element('urlset', xmlns='http://www.sitemaps.org/schemas/sitemap/0.9')
+        urls = [url_for(endpoint, _external=True) for endpoint in ('shop_home', 'shop_catalog', 'category_index')]
+        urls.extend(url_for('category_page', category_path=row['path'], _external=True)
+                    for row in category_rows(get_db(), public=True))
+        visible, ids = visibility_sql(get_db())
+        urls.extend(url_for('shop_product', product_id=row['id'], _external=True)
+                    for row in get_db().execute('SELECT id FROM products WHERE active=1 AND '+visible+' ORDER BY id', ids))
+        for location in urls:
+            SubElement(SubElement(root, 'url'), 'loc').text = location
+        return Response(tostring(root, encoding='utf-8', xml_declaration=True), mimetype='application/xml')
+
+    @app.get('/robots.txt')
+    def robots():
+        # Allow only public content, without enumerating private routes.
+        rules = ['User-agent: *', 'Disallow: /', 'Allow: /$',
+                 'Allow: /tienda/catalogo$', 'Allow: /tienda/catalogo?',
+                 'Allow: /tienda/jersey/', 'Allow: /categorias$', 'Allow: /categorias/',
+                 'Allow: /static/', 'Allow: /imagenes/', 'Allow: /sitemap.xml$',
+                 'Sitemap: '+url_for('sitemap', _external=True)]
+        return Response('\n'.join(rules)+'\n', mimetype='text/plain')
+
     def settings():
         return dict(get_db().execute('SELECT key,value FROM shop_settings').fetchall())
 
