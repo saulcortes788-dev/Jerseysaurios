@@ -69,8 +69,8 @@
 .storefront .shop-header nav a{flex-shrink:0;display:inline-flex;align-items:center;min-height:var(--tap);padding:0 var(--s3);color:var(--c-ink);font-size:var(--fs-xs);font-weight:800;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;white-space:nowrap;border-bottom:3px solid transparent}
 .storefront .shop-header nav a:hover{color:var(--c-brand)}
 .storefront .shop-header nav a[aria-current=page]{color:var(--c-brand);border-bottom-color:var(--c-brand)}
-.storefront .shop-header nav a.nav-hot{color:var(--c-accent)}
-.storefront .shop-header nav a.nav-hot[aria-current=page]{border-bottom-color:var(--c-accent)}
+.storefront .shop-header nav a.nav-hot{color:var(--c-accent-ink);background:var(--c-accent);border-radius:var(--r-sm)}
+.storefront .shop-header nav a.nav-hot[aria-current=page]{border-bottom-color:var(--c-brand)}
 .storefront .shop-cart{order:2;display:inline-flex;align-items:center;gap:var(--s2);min-height:var(--tap);padding:0 var(--s2) 0 var(--s4);border-radius:var(--r-sm);background:var(--c-brand);color:var(--c-brand-ink);font-size:var(--fs-xs);font-weight:800;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;transition:transform .15s var(--ease),box-shadow .15s var(--ease)}
 .storefront .shop-cart:hover{transform:translate(-2px,-2px);box-shadow:3px 3px 0 var(--c-accent)}
 .storefront .shop-cart[aria-current=page]{box-shadow:0 0 0 2px var(--c-bg),0 0 0 4px var(--c-brand)}
