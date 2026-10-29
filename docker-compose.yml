@@ -2,9 +2,9 @@
 services:
   web:
     build: .
-    image: jerseysaurios:local
+    image: jerseysaurios:1.0.0
     ports:
-      - "8080:8000"
+      - "127.0.0.1:8080:8000"
     environment:
       JERSEY_ENV: local
     volumes:
