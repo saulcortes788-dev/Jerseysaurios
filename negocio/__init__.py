@@ -197,11 +197,23 @@ def create_app(test_config: dict | None = None) -> Flask:
         except sqlite3.Error:
             return {'status':'unavailable'},503
 
+    PUBLIC_PAGES = {'sitemap', 'robots', 'shop_home', 'shop_catalog', 'shop_product', 'category_index', 'category_page'}
+
+    def cache_policy(response):
+        """no-store para admin, carrito, checkout, recibos y sesiones de admin; caché larga solo para archivos públicos."""
+        if session.get('admin_id'):
+            return 'no-store'
+        if request.endpoint in ('static', 'product_image') and response.status_code in (200, 304):
+            return 'public, max-age=604800'
+        if request.endpoint in PUBLIC_PAGES and response.status_code == 200:
+            return 'no-cache'
+        return 'no-store'
+
     @app.after_request
     def protect_response(response):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = cache_policy(response)
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         if app.config['PRODUCTION']:
             response.headers['Strict-Transport-Security'] = 'max-age=31536000' 
@@ -376,7 +388,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         db = get_db()
         public = (db.execute('SELECT 1 FROM products WHERE active=1 AND image_path=?',(filename,)).fetchone()
             or db.execute('SELECT 1 FROM product_photos ph JOIN products p ON p.id=ph.product_id WHERE p.active=1 AND ph.image_path=?',(filename,)).fetchone()
-            or db.execute('SELECT 1 FROM shop_categories WHERE image_path=?',(filename,)).fetchone()
+            or db.execute('SELECT 1 FROM shop_categories WHERE active=1 AND image_path=?',(filename,)).fetchone()
             or db.execute('SELECT 1 FROM site_sections WHERE image_path=?',(filename,)).fetchone())
         if not public and not session.get('admin_id'): abort(404)
         return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
@@ -508,7 +520,3 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     return app
 
-
-if __name__ == "__main__":
-    # Solo accesible desde esta computadora. No exponer este servidor a Internet.
-    create_app().run(host="127.0.0.1", port=5000, debug=False)

@@ -9,6 +9,15 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 def register_access(app, get_db):
     failures = {}
+    MAX_FAILURES = 1000
+
+    def prune_failures():
+        """Elimina intentos vencidos y acota el tamaño del registro (descarta los más antiguos)."""
+        now = monotonic()
+        for k in [k for k, (_, until) in failures.items() if until <= now]:
+            del failures[k]
+        for k in sorted(failures, key=lambda k: failures[k][1])[:max(0, len(failures) - MAX_FAILURES)]:
+            del failures[k]
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', PERMANENT_SESSION_LIFETIME=timedelta(hours=8))
 
     @app.before_request
@@ -51,6 +60,7 @@ def register_access(app, get_db):
     def login():
         if request.method == 'POST':
             key = request.remote_addr or 'local'
+            prune_failures()
             count, until = failures.get(key,(0,0))
             if count >= 8 and monotonic() < until:
                 flash('Demasiados intentos. Espera un minuto e inténtalo de nuevo.','error')

@@ -1,6 +1,7 @@
 """Tienda pública, variantes, pedidos y administración comercial."""
 import secrets
 import sqlite3
+from time import monotonic
 from urllib.parse import urlencode
 from xml.etree.ElementTree import Element, SubElement, tostring
 from flask import request, session, render_template, redirect, url_for, flash, abort, Response
@@ -45,8 +46,59 @@ def initialize_store(db):
     initialize_categories(db)
 
 
+ORDER_LIMIT = 5          # pedidos por IP dentro de la ventana
+ORDER_WINDOW = 600       # segundos (10 min)
+STALE_HOURS = 48         # pedidos pendientes sin pagos se cancelan después de este tiempo
+CLEANUP_EVERY = 600      # segundos entre limpiezas de pedidos vencidos
+
+
+def restock_and_cancel(db, order_id):
+    """Devuelve el stock de un pedido y lo marca como cancelado (usar dentro de una transacción)."""
+    db.execute('UPDATE sales SET voided=1 WHERE order_id=?', (order_id,))
+    for i in db.execute('SELECT * FROM order_items WHERE order_id=?', (order_id,)).fetchall():
+        db.execute('UPDATE products SET stock=stock+? WHERE id=?', (i['quantity'], i['product_id']))
+    db.execute("UPDATE orders SET status='cancelado' WHERE id=?", (order_id,))
+
+
 def register_store(app, get_db, money, integer):
     register_category_admin(app,get_db,integer)
+    order_hits = {}          # ip -> [monotonic timestamps] de pedidos recientes
+    cleanup = app.extensions['stale_cleanup'] = {'next': 0.0}
+
+    def rate_limited(ip, record=False):
+        """True si la IP superó ORDER_LIMIT pedidos en ORDER_WINDOW; record=True registra un pedido nuevo."""
+        now = monotonic()
+        for key in [k for k, v in order_hits.items() if not v or v[-1] <= now - ORDER_WINDOW]:
+            del order_hits[key]
+        hits = [t for t in order_hits.get(ip, []) if t > now - ORDER_WINDOW]
+        if record:
+            hits.append(now)
+            order_hits[ip] = hits
+            return False
+        return len(hits) >= ORDER_LIMIT
+
+    def release_stale_orders(db):
+        """Cancela pedidos pendientes sin pagos con más de STALE_HOURS horas y devuelve su stock."""
+        rows = db.execute("""SELECT id FROM orders WHERE status='pendiente'
+            AND created_at < datetime('now','localtime',?)
+            AND NOT EXISTS (SELECT 1 FROM payments WHERE order_id=orders.id)""", (f'-{STALE_HOURS} hours',)).fetchall()
+        for row in rows:
+            with db:
+                db.execute('BEGIN IMMEDIATE')
+                # Revalida dentro de la transacción: pudo recibir un pago o cambiar de estado.
+                if db.execute("SELECT 1 FROM orders o WHERE o.id=? AND o.status='pendiente' AND NOT EXISTS (SELECT 1 FROM payments WHERE order_id=o.id)", (row['id'],)).fetchone():
+                    restock_and_cancel(db, row['id'])
+        return len(rows)
+
+    @app.before_request
+    def maybe_release_stale_orders():
+        if request.endpoint not in ('checkout', 'orders_admin', 'order_admin') or monotonic() < cleanup['next']:
+            return
+        cleanup['next'] = monotonic() + CLEANUP_EVERY
+        try:
+            release_stale_orders(get_db())
+        except sqlite3.Error:
+            app.logger.exception('No se pudieron liberar pedidos vencidos')
 
     @app.get('/sitemap.xml')
     def sitemap():
@@ -229,6 +281,11 @@ def register_store(app, get_db, money, integer):
         if not key or key != session.get('checkout_key'): abort(400)
         existing = db.execute('SELECT token FROM orders WHERE checkout_key=?', (key,)).fetchone()
         if existing: return redirect(url_for('order_receipt', token=existing['token']))
+        ip = request.remote_addr or 'local'
+        if rate_limited(ip):
+            flash('Demasiados pedidos desde tu conexión. Espera unos minutos e inténtalo de nuevo.', 'error')
+            rows = cart_rows()
+            return render_template('shop/cart.html', rows=rows, total=sum(r['total'] for r in rows)), 429
         try:
             name = request.form.get('name','').strip()[:100]
             phone = request.form.get('phone','').strip()[:40]
@@ -262,6 +319,7 @@ def register_store(app, get_db, money, integer):
                                (order_id,pid,p['name'],p['sku'],p['size'],qty,p['price_cents'],p['cost_cents']))
                 db.execute('UPDATE orders SET total_cents=? WHERE id=?', (total,order_id))
             session['cart'] = {}
+            rate_limited(ip, record=True)
             return redirect(url_for('order_receipt', token=token))
         except (ValueError, sqlite3.IntegrityError) as exc:
             flash(str(exc) if isinstance(exc,ValueError) else 'El pedido ya fue recibido. Revisa tu carrito.', 'error')
@@ -329,10 +387,7 @@ def register_store(app, get_db, money, integer):
                                 if request.form.get('refund_confirm')!='yes' or not reference:
                                     raise ValueError('Confirma el reembolso manual y registra su referencia antes de cancelar un pedido con pagos.')
                                 db.execute('INSERT INTO refunds(order_id,amount_cents,reference) VALUES(?,?,?)',(order_id,paid,reference))
-                            db.execute('UPDATE sales SET voided=1 WHERE order_id=?',(order_id,))
-                            for i in db.execute('SELECT * FROM order_items WHERE order_id=?', (order_id,)).fetchall():
-                                db.execute('UPDATE products SET stock=stock+? WHERE id=?', (i['quantity'],i['product_id']))
-                            db.execute("UPDATE orders SET status='cancelado' WHERE id=?", (order_id,))
+                            restock_and_cancel(db, order_id)
                         elif (order['status'],target) in (('pagado','enviado'),('enviado','entregado')):
                             db.execute('UPDATE orders SET status=? WHERE id=?', (target,order_id))
                         elif target=='pagado' and order['status']=='pendiente' and order['total_cents']==0:

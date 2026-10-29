@@ -312,3 +312,34 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.dbrow('SELECT status FROM orders WHERE id=2')[0],'pendiente')
         self.assertIn(b'Sin datos registrados',self.client.get('/admin/pedidos/1').data)
         self.assertEqual(self.dbrow('SELECT delivery_method,delivery_details FROM orders WHERE id=1')[:],('',''))
+
+    def test_checkout_rate_limit_per_ip(self):
+        self.product(stock='50')
+        codes=[self.order(1)[3].status_code for _ in range(6)]
+        self.assertEqual(codes[:5],[302]*5)
+        self.assertEqual(codes[5],429)
+        self.assertEqual(self.dbrow('SELECT COUNT(*) FROM orders')[0],5)
+
+    def test_stale_unpaid_orders_are_released_once(self):
+        self.product()
+        self.order(2);self.order(1)
+        with sqlite3.connect(self.app.config['DATABASE']) as db:
+            db.execute("INSERT INTO payments(order_id,amount_cents,method) VALUES(2,100,'Efectivo')")
+            db.execute("UPDATE orders SET created_at=datetime('now','localtime','-49 hours')")
+        self.assertEqual(self.dbrow('SELECT stock FROM products')[0],2)
+        self.app.extensions['stale_cleanup']['next']=0.0
+        self.client.get('/admin/pedidos')
+        self.assertEqual(self.dbrow('SELECT status FROM orders WHERE id=1')[0],'cancelado')
+        self.assertEqual(self.dbrow('SELECT status FROM orders WHERE id=2')[0],'pendiente')
+        self.assertEqual(self.dbrow('SELECT stock FROM products')[0],4)
+
+    def test_cache_headers_and_inactive_category_image(self):
+        self.product()
+        anon,_=self.buyer()
+        self.assertEqual(anon.get('/tienda/catalogo').headers['Cache-Control'],'no-cache')
+        self.assertEqual(anon.get('/carrito').headers['Cache-Control'],'no-store')
+        self.assertEqual(self.client.get('/admin/pedidos').headers['Cache-Control'],'no-store')
+        self.assertEqual(anon.get('/static/shop.css').headers['Cache-Control'],'public, max-age=604800')
+        with sqlite3.connect(self.app.config['DATABASE']) as db:
+            db.execute("INSERT INTO shop_categories(name,slug,image_path,active) VALUES('Inactiva','inactiva','x.jpg',0)")
+        self.assertEqual(anon.get('/imagenes/x.jpg').status_code,404)
