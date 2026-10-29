@@ -32,3 +32,11 @@ if (window.matchMedia('(max-width: 899px)').matches) {
 
 // El enlace activo de la navegación queda visible cuando la barra se desplaza en móvil.
 document.querySelector('.shop-header nav [aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+
+// La cabecera fija gana sombra al desplazarse.
+const header = document.querySelector('.shop-header');
+if (header) {
+  const onScroll = () => header.classList.toggle('is-scrolled', window.scrollY > 8);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+}

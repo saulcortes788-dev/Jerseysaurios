@@ -197,6 +197,15 @@ def create_app(test_config: dict | None = None) -> Flask:
         except sqlite3.Error:
             return {'status':'unavailable'},503
 
+    @app.url_defaults
+    def static_version(endpoint, values):
+        """Versiona los estáticos con su fecha de modificación para invalidar la caché larga."""
+        if endpoint == 'static' and 'filename' in values and 'v' not in values:
+            try:
+                values['v'] = int(os.stat(os.path.join(app.static_folder, values['filename'])).st_mtime)
+            except OSError:
+                pass
+
     PUBLIC_PAGES = {'sitemap', 'robots', 'shop_home', 'shop_catalog', 'shop_product', 'category_index', 'category_page'}
 
     def cache_policy(response):

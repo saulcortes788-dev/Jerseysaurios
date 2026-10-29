@@ -1,0 +1,14 @@
+# Despliegue local. Para producción usa render.yaml (JERSEY_ENV=production).
+services:
+  web:
+    build: .
+    image: jerseysaurios:local
+    ports:
+      - "8080:8000"
+    environment:
+      JERSEY_ENV: local
+    volumes:
+      - datos:/var/data/jerseysaurios
+    restart: unless-stopped
+volumes:
+  datos:
